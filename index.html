@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+  <title>TAROMAN Fighting Game - べらぼうな格闘劇</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+      margin: 0;
+      padding: 0;
+    }
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #000;
+      font-family: 'Hiragino Kaku Gothic ProN', 'メイリオ', sans-serif;
+      color: #fff;
+    }
+    #game-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #000;
+    }
+    canvas {
+      background: #111;
+      box-shadow: 0 0 20px rgba(255, 0, 0, 0.5);
+      touch-action: none;
+    }
+    .touch-controls {
+      position: absolute;
+      bottom: 10px;
+      left: 0;
+      width: 100%;
+      height: 140px;
+      pointer-events: none;
+      display: flex;
+      justify-content: space-between;
+      padding: 0 20px;
+      z-index: 10;
+    }
+    .dpad, .action-buttons {
+      pointer-events: auto;
+      position: relative;
+    }
+    .dpad {
+      width: 130px;
+      height: 130px;
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 50%;
+      border: 2px solid rgba(255, 255, 255, 0.4);
+    }
+    .dpad-btn {
+      position: absolute;
+      width: 40px;
+      height: 40px;
+      background: rgba(200, 200, 200, 0.5);
+      border: 2px solid #fff;
+      border-radius: 8px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-weight: bold;
+      font-size: 16px;
+      color: #fff;
+    }
+    .dpad-up { top: 5px; left: 45px; }
+    .dpad-down { bottom: 5px; left: 45px; }
+    .dpad-left { top: 45px; left: 5px; }
+    .dpad-right { top: 45px; right: 5px; }
+
+    .action-buttons {
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+      margin-bottom: 5px;
+    }
+    .act-btn {
+      width: 55px;
+      height: 55px;
+      border-radius: 50%;
+      border: 2px solid #fff;
+      color: #fff;
+      font-weight: bold;
+      font-size: 13px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.6);
+    }
+    .btn-punch { background: #e74c3c; }
+    .btn-kick { background: #e67e22; }
+    .btn-beam { background: #9b59b6; width: 65px; height: 65px; font-size: 14px; border-color: #f1c40f; }
+    .act-btn:active, .dpad-btn:active { opacity: 0.6; transform: scale(0.92); }
+
+    #counter-display {
+      position: absolute;
+      top: 10px;
+      right: 15px;
+      background: #000;
+      border: 2px solid #00ff00;
+      color: #00ff00;
+      font-family: monospace;
+      padding: 4px 8px;
+      font-size: 12px;
+      z-index: 5;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <div id="counter-display">訪問者数: <span id="visitor-count">000109</span></div>
+    <canvas id="gameCanvas"></canvas>
+
+    <div class="touch-controls">
+      <div class="dpad">
+        <div class="dpad-btn dpad-up" id="btn-up">▲</div>
+        <div class="dpad-btn dpad-down" id="btn-down">▼</div>
+        <div class="dpad-btn dpad-left" id="btn-left">◀</div>
+        <div class="dpad-btn dpad-right" id="btn-right">▶</div>
+      </div>
+      <div class="action-buttons">
+        <div class="act-btn btn-punch" id="btn-punch">パンチ</div>
+        <div class="act-btn btn-kick" id="btn-kick">キック</div>
+        <div class="act-btn btn-beam" id="btn-beam">ビーム</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    const GAME_WIDTH = 800;
+    const GAME_HEIGHT = 450;
+    let scale = 1;
+
+    function resizeCanvas() {
+      const containerWidth = window.innerWidth;
+      const containerHeight = window.innerHeight;
+      let w = containerWidth;
+      let h = containerWidth * (GAME_HEIGHT / GAME_WIDTH);
+
+      if (h > containerHeight) {
+        h = containerHeight;
+        w = containerHeight * (GAME_WIDTH / GAME_HEIGHT);
+      }
+
+      canvas.width = GAME_WIDTH;
+      canvas.height = GAME_HEIGHT;
+      canvas.style.width = `${w}px`;
+      canvas.style.height = `${h}px`;
+      scale = w / GAME_WIDTH;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    let count = localStorage.getItem('taroman_counter') || 108;
+    count = parseInt(count) + 1;
+    localStorage.setItem('taroman_counter', count);
+    document.getElementById('visitor-count').innerText = String(count).padStart(6, '0');
+
+    const keys = { left: false, right: false, up: false, down: false, punch: false, kick: false, beam: false };
+
+    function bindTouch(elementId, keyName) {
+      const el = document.getElementById(elementId);
+      if (!el) return;
+      const start = (e) => { e.preventDefault(); keys[keyName] = true; };
+      const end = (e) => { e.preventDefault(); keys[keyName] = false; };
+      el.addEventListener('touchstart', start);
+      el.addEventListener('touchend', end);
+      el.addEventListener('mousedown', start);
+      el.addEventListener('mouseup', end);
+    }
+    bindTouch('btn-up', 'up');
+    bindTouch('btn-down', 'down');
+    bindTouch('btn-left', 'left');
+    bindTouch('btn-right', 'right');
+    bindTouch('btn-punch', 'punch');
+    bindTouch('btn-kick', 'kick');
+    bindTouch('btn-beam', 'beam');
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') keys.left = true;
+      if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') keys.right = true;
+      if (e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp') keys.up = true;
+      if (e.key === 's' || e.key === 'S' || e.key === 'ArrowDown') keys.down = true;
+      if (e.key === 'j' || e.key === 'J') keys.punch = true;
+      if (e.key === 'k' || e.key === 'K') keys.kick = true;
+      if (e.key === 'l' || e.key === 'L') keys.beam = true;
+    });
+    window.addEventListener('keyup', (e) => {
+      if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') keys.left = false;
+      if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') keys.right = false;
+      if (e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp') keys.up = false;
+      if (e.key === 's' || e.key === 'S' || e.key === 'ArrowDown') keys.down = false;
+      if (e.key === 'j' || e.key === 'J') keys.punch = false;
+      if (e.key === 'k' || e.key === 'K') keys.kick = false;
+      if (e.key === 'l' || e.key === 'L') keys.beam = false;
+    });
+
+    let gameState = 'TITLE';
+    let difficulty = 'NORMAL';
+    let currentStage = 0;
+    let isBuildingTaroman = false;
+
+    const bossList = [
+      { name: '森の掟', hp: 100, color: '#27ae60', type: 'MORI' },
+      { name: '歓喜', hp: 120, color: '#f1c40f', type: 'KANKI' },
+      { name: '縄文人', hp: 150, color: '#8e44ad', type: 'JOMON' },
+      { name: '駄々っ子', hp: 110, color: '#e67e22', type: 'DADAKKO' },
+      { name: '疾走する眼', hp: 130, color: '#e74c3c', type: 'EYE' },
+      { name: '未来の顔', hp: 140, color: '#2980b9', type: 'MIRAI' },
+      { name: '重工業巨人', hp: 180, color: '#34495e', type: 'BUILDING' },
+      { name: 'あすの神話', hp: 200, color: '#c0392b', type: 'MYTH' },
+      { name: '太陽の塔', hp: 300, color: '#f39c12', type: 'SUN' }
+    ];
+
+    let player, enemy;
+    let projectiles = [];
+    let effects = [];
+
+    class Player {
+      constructor() {
+        this.x = 100;
+        this.y = 280;
+        this.w = 50;
+        this.h = 100;
+        this.vx = 0;
+        this.vy = 0;
+        this.isGrounded = true;
+        this.hp = 100;
+        this.maxHp = 100;
+        this.gauge = 0;
+        this.state = 'IDLE';
+        this.stateTimer = 0;
+        this.stunTimer = 0;
+      }
+
+      update() {
+        if (this.stunTimer > 0) {
+          this.stunTimer--;
+          return;
+        }
+
+        if (this.state === 'IDLE') {
+          if (keys.left) this.vx = -4;
+          else if (keys.right) this.vx = 4;
+          else this.vx = 0;
+
+          if (keys.up && this.isGrounded) {
+            this.vy = -12;
+            this.isGrounded = false;
+          }
+
+          if (keys.punch) {
+            this.state = 'PUNCH';
+            this.stateTimer = 15;
+          } else if (keys.kick) {
+            this.state = 'KICK';
+            this.stateTimer = 18;
+          } else if (keys.beam && this.gauge >= 100) {
+            this.state = 'BEAM';
+            this.stateTimer = 40;
+            this.gauge = 0;
+            projectiles.push({
+              x: this.x + 40,
+              y: this.y + 25,
+              w: 700,
+              h: 30,
+              life: 25,
+              type: 'BEAM',
+              owner: 'PLAYER'
+            });
+          }
+        }
+
+        this.vy += 0.6;
+        this.x += this.vx;
+        this.y += this.vy;
+
+        if (this.y >= 280) {
+          this.y = 280;
+          this.vy = 0;
+          this.isGrounded = true;
+        }
+
+        if (this.stateTimer > 0) {
+          this.stateTimer--;
+          if (this.stateTimer <= 0) this.state = 'IDLE';
+        }
+
+        if (this.x < 10) this.x = 10;
+        if (this.x > GAME_WIDTH - 60) this.x = GAME_WIDTH - 60;
+      }
+
+      draw() {
+        ctx.save();
+        ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
+
+        if (isBuildingTaroman) {
+          ctx.fillStyle = '#2c3e50';
+          ctx.fillRect(-35, -20, 70, 70);
+          ctx.strokeStyle = '#fff';
+          ctx.strokeRect(-35, -20, 70, 70);
+        }
+
+        for (let i = 0; i < 5; i++) {
+          ctx.fillStyle = i % 2 === 0 ? '#ff0000' : '#f39c12';
+          ctx.beginPath();
+          ctx.arc((Math.random() - 0.5) * 10, -50 + (Math.random() - 0.5) * 10, 20 + Math.random() * 5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        ctx.fillStyle = '#f1c40f';
+        ctx.beginPath();
+        ctx.arc(0, -45, 18, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#d35400';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.fillStyle = '#000';
+        ctx.fillRect(-6, -50, 4, 10);
+        ctx.fillRect(2, -50, 4, 10);
+
+        if (!isBuildingTaroman) {
+          ctx.fillStyle = '#e74c3c';
+          ctx.fillRect(-15, -30, 30, 50);
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(-5, -20, 10, 30);
+        }
+
+        ctx.fillStyle = '#bdc3c7';
+        if (this.state === 'KICK') {
+          ctx.fillRect(-10, 20, 10, 30);
+          ctx.fillStyle = '#e74c3c';
+          ctx.fillRect(0, -5, 45, 15);
+        } else {
+          ctx.fillRect(-12, 20, 10, 30);
+          ctx.fillRect(2, 20, 10, 30);
+        }
+
+        if (this.state === 'PUNCH') {
+          ctx.fillStyle = '#e74c3c';
+          ctx.fillRect(10, -25, 35, 12);
+        } else if (this.state === 'BEAM') {
+          ctx.fillStyle = '#e74c3c';
+          ctx.fillRect(5, -20, 30, 10);
+          ctx.fillStyle = '#f1c40f';
+          ctx.beginPath();
+          ctx.arc(35, -15, 8, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        if (this.stunTimer > 0) {
+          ctx.strokeStyle = '#f1c40f';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(-20, -50); ctx.lineTo(20, 40);
+          ctx.moveTo(20, -50); ctx.lineTo(-20, 40);
+          ctx.stroke();
+        }
+
+        ctx.restore();
+      }
+    }
+
+    class Enemy {
+      constructor(data) {
+        this.name = data.name;
+        this.type = data.type;
+        this.hp = data.hp;
+        this.maxHp = data.hp;
+        this.x = 600;
+        this.y = 280;
+        this.w = 60;
+        this.h = 100;
+        this.vx = 0;
+        this.vy = 0;
+        this.color = data.color;
+        this.state = 'IDLE';
+        this.stateTimer = 0;
+
+        if (this.type === 'SUN') {
+          this.w = 150;
+          this.h = 300;
+          this.y = 80;
+        }
+      }
+
+      update() {
+        if (this.state === 'DOWN') {
+          this.stateTimer--;
+          if (this.stateTimer <= 0) {
+            this.state = 'RISE';
+            this.stateTimer = 20;
+          }
+          return;
+        }
+
+        if (this.state === 'RISE') {
+          this.stateTimer--;
+          if (this.stateTimer <= 0) this.state = 'IDLE';
+          return;
+        }
+
+        let speed = difficulty === 'EASY' ? 1 : difficulty === 'NORMAL' ? 2 : 5;
+
+        if (this.state === 'IDLE') {
+          if (this.x > player.x + 80) this.x -= speed;
+          else if (this.x < player.x - 80) this.x += speed;
+
+          if (Math.random() < (difficulty === 'NANI_KORE' ? 0.08 : 0.02)) {
+            this.attack();
+          }
+        }
+
+        this.vy += 0.6;
+        this.y += this.vy;
+
+        let floor = this.type === 'SUN' ? 80 : 280;
+        if (this.y >= floor) {
+          this.y = floor;
+          this.vy = 0;
+
+          if (this.state === 'DADA_JUMP') {
+            this.hp -= 40;
+            this.state = 'DOWN';
+            this.stateTimer = 30;
+            effects.push({ x: this.x, y: this.y, text: '激突ドカン！', life: 30 });
+          }
+        }
+
+        if (this.stateTimer > 0) {
+          this.stateTimer--;
+          if (this.stateTimer <= 0 && this.state !== 'DOWN') this.state = 'IDLE';
+        }
+      }
+
+      attack() {
+        this.state = 'ATTACK';
+        this.stateTimer = 30;
+
+        if (this.type === 'JOMON') {
+          projectiles.push({ x: this.x - 20, y: this.y + 20, vx: -5, vy: -2, radius: 12, type: 'MUD', owner: 'ENEMY' });
+        } else if (this.type === 'MORI') {
+          projectiles.push({ x: this.x, y: this.y + 20, vx: -6, vy: 0, radius: 18, type: 'HEAD', owner: 'ENEMY' });
+        } else if (this.type === 'KANKI') {
+          projectiles.push({ x: this.x - 20, y: this.y, vx: -4, vy: 0, radius: 10, type: 'NOTE', owner: 'ENEMY' });
+        } else if (this.type === 'DADAKKO') {
+          this.vy = -16;
+          this.state = 'DADA_JUMP';
+        }
+      }
+
+      takeDamage(dmg) {
+        if (this.state === 'DOWN') return;
+        this.hp -= dmg;
+        player.gauge = Math.min(100, player.gauge + 15);
+
+        if (dmg >= 20) {
+          this.state = 'DOWN';
+          this.stateTimer = 40;
+          this.vy = -6;
+        }
+      }
+
+      draw() {
+        ctx.save();
+        ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
+
+        if (this.state === 'DOWN') {
+          ctx.rotate(Math.PI / 2);
+        }
+
+        // --- 個性豊かな奇獣描画 ---
+        if (this.type === 'SUN') {
+          // 太陽の塔（3倍サイズ）
+          ctx.fillStyle = '#f5f5f5';
+          ctx.beginPath();
+          ctx.moveTo(-30, 150); ctx.lineTo(-60, -100); ctx.lineTo(0, -150); ctx.lineTo(60, -100); ctx.lineTo(30, 150);
+          ctx.fill();
+          ctx.fillStyle = '#f1c40f';
+          ctx.beginPath(); ctx.arc(0, -110, 35, 0, Math.PI*2); ctx.fill(); // 金の顔
+          ctx.fillStyle = '#000';
+          ctx.beginPath(); ctx.arc(0, 0, 25, 0, Math.PI*2); ctx.fill(); // 黒い太陽
+        } else if (this.type === 'JOMON') {
+          // 縄文人（土偶）
+          ctx.fillStyle = '#8e44ad';
+          ctx.beginPath(); ctx.arc(0, -35, 25, 0, Math.PI*2); ctx.fill(); // 巨大メガネ風の頭
+          ctx.fillRect(-20, -10, 40, 60);
+          ctx.fillStyle = '#f39c12';
+          ctx.fillRect(-15, -40, 10, 10); ctx.fillRect(5, -40, 10, 10);
+        } else if (this.type === 'MORI') {
+          // 森の掟
+          ctx.fillStyle = '#27ae60';
+          ctx.fillRect(-25, -40, 50, 80);
+          ctx.fillStyle = '#e74c3c';
+          ctx.beginPath(); ctx.arc(0, -35, 20, 0, Math.PI*2); ctx.fill();
+        } else if (this.type === 'KANKI') {
+          // 歓喜（梵鐘）
+          ctx.fillStyle = '#f1c40f';
+          ctx.beginPath(); ctx.arc(0, -20, 30, Math.PI, 0); ctx.fill();
+          ctx.fillRect(-30, -20, 60, 60);
+        } else if (this.type === 'EYE') {
+          // 疾走する眼
+          ctx.fillStyle = '#fff';
+          ctx.beginPath(); ctx.arc(0, -10, 35, 0, Math.PI*2); ctx.fill();
+          ctx.fillStyle = '#e74c3c';
+          ctx.beginPath(); ctx.arc(0, -10, 15, 0, Math.PI*2); ctx.fill();
+          ctx.fillStyle = '#000';
+          ctx.fillRect(-15, 25, 10, 25); ctx.fillRect(5, 25, 10, 25); // 足
+        } else if (this.type === 'BUILDING') {
+          // 重工業巨人
+          ctx.fillStyle = '#34495e';
+          ctx.fillRect(-30, -50, 60, 100);
+          ctx.fillStyle = '#f1c40f';
+          for(let i=-20; i<=10; i+=15) {
+            for(let j=-40; j<=30; j+=20) ctx.fillRect(i, j, 8, 12);
+          }
+        } else {
+          // その他
+          ctx.fillStyle = this.color;
+          ctx.fillRect(-this.w/2, -this.h/2, this.w, this.h);
+        }
+
+        ctx.restore();
+      }
+    }
+
+    function initGame() {
+      player = new Player();
+      enemy = new Enemy(bossList[currentStage]);
+      projectiles = [];
+      effects = [];
+    }
+
+    function update() {
+      if (gameState !== 'PLAYING') return;
+
+      player.update();
+      enemy.update();
+
+      if (player.state === 'PUNCH' && player.stateTimer === 10) {
+        if (Math.abs(player.x - enemy.x) < 80) enemy.takeDamage(12);
+      }
+      if (player.state === 'KICK' && player.stateTimer === 12) {
+        if (Math.abs(player.x - enemy.x) < 90) enemy.takeDamage(22);
+      }
+
+      for (let i = projectiles.length - 1; i >= 0; i--) {
+        let p = projectiles[i];
+        if (p.type === 'BEAM') {
+          p.life--;
+          if (enemy.state !== 'DOWN' && Math.abs(enemy.y - player.y) < 100) {
+            enemy.takeDamage(2);
+          }
+          if (p.life <= 0) projectiles.splice(i, 1);
+        } else {
+          p.x += p.vx || 0;
+          p.y += p.vy || 0;
+
+          if (p.owner === 'ENEMY' && Math.abs(p.x - player.x) < 35 && Math.abs(p.y - player.y) < 50) {
+            if (p.type === 'NOTE') {
+              player.stunTimer = 90;
+              effects.push({ x: player.x, y: player.y, text: 'ビリビリ！', life: 30 });
+            } else {
+              player.hp -= 15;
+            }
+            projectiles.splice(i, 1);
+          }
+        }
+      }
+
+      if (enemy.hp <= 0) {
+        if (enemy.type === 'BUILDING') {
+          isBuildingTaroman = true;
+        }
+
+        currentStage++;
+        if (currentStage >= bossList.length) {
+          gameState = 'CLEAR';
+        } else {
+          enemy = new Enemy(bossList[currentStage]);
+        }
+      }
+
+      if (player.hp <= 0) {
+        gameState = 'GAMEOVER';
+      }
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+      ctx.fillStyle = '#111';
+      ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+      ctx.fillStyle = '#222';
+      ctx.fillRect(0, 380, GAME_WIDTH, 70);
+
+      if (gameState === 'TITLE') {
+        ctx.fillStyle = '#e74c3c';
+        ctx.font = 'bold 36px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('タローマン べらぼう格闘劇', GAME_WIDTH/2, 150);
+
+        ctx.fillStyle = '#fff';
+        ctx.font = '20px sans-serif';
+        ctx.fillText('タップまたはクリックしてスタート！', GAME_WIDTH/2, 260);
+        return;
+      }
+
+      if (gameState === 'SELECT_DIFF') {
+        ctx.fillStyle = '#fff';
+        ctx.font = '24px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('難易度を選択してください', GAME_WIDTH/2, 100);
+
+        ctx.fillStyle = '#2ecc71';
+        ctx.fillRect(250, 150, 300, 50);
+        ctx.fillStyle = '#f39c12';
+        ctx.fillRect(250, 220, 300, 50);
+        ctx.fillStyle = '#e74c3c';
+        ctx.fillRect(250, 290, 300, 50);
+
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 20px sans-serif';
+        ctx.fillText('超簡単', GAME_WIDTH/2, 182);
+        ctx.fillText('普通', GAME_WIDTH/2, 252);
+        ctx.fillText('なんだこれ (カオス)', GAME_WIDTH/2, 322);
+        return;
+      }
+
+      if (gameState === 'PLAYING') {
+        player.draw();
+        enemy.draw();
+
+        projectiles.forEach(p => {
+          if (p.type === 'BEAM') {
+            ctx.fillStyle = `hsl(${Math.random() * 360}, 100%, 50%)`;
+            ctx.fillRect(p.x, p.y - 15, p.w, p.h);
+          } else if (p.type === 'MUD') {
+            ctx.fillStyle = '#795548';
+            ctx.beginPath(); ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2); ctx.fill();
+          } else if (p.type === 'NOTE') {
+            ctx.fillStyle = '#f1c40f';
+            ctx.font = '24px sans-serif';
+            ctx.fillText('♪', p.x, p.y);
+          } else {
+            ctx.fillStyle = '#e74c3c';
+            ctx.beginPath(); ctx.arc(p.x, p.y, p.radius || 10, 0, Math.PI*2); ctx.fill();
+          }
+        });
+
+        effects.forEach(ef => {
+          ctx.fillStyle = '#f1c40f';
+          ctx.font = 'bold 18px sans-serif';
+          ctx.fillText(ef.text, ef.x, ef.y);
+          ef.life--;
+        });
+
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 16px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(`タローマン HP: ${player.hp}`, 20, 30);
+        ctx.fillStyle = '#333';
+        ctx.fillRect(20, 40, 200, 15);
+        ctx.fillStyle = '#e74c3c';
+        ctx.fillRect(20, 40, player.hp * 2, 15);
+
+        ctx.fillStyle = '#fff';
+        ctx.fillText(`芸術爆発ゲージ: ${player.gauge}%`, 20, 75);
+        ctx.fillStyle = '#333';
+        ctx.fillRect(20, 85, 200, 10);
+        ctx.fillStyle = '#9b59b6';
+        ctx.fillRect(20, 85, player.gauge * 2, 10);
+
+        ctx.textAlign = 'right';
+        ctx.fillText(`${enemy.name} HP: ${Math.max(0, enemy.hp)}`, GAME_WIDTH - 20, 30);
+        ctx.fillStyle = '#333';
+        ctx.fillRect(GAME_WIDTH - 220, 40, 200, 15);
+        ctx.fillStyle = enemy.color;
+        ctx.fillRect(GAME_WIDTH - 220, 40, Math.max(0, enemy.hp / enemy.maxHp * 200), 15);
+
+        ctx.textAlign = 'center';
+        ctx.fillText(`STAGE ${currentStage + 1} / 9`, GAME_WIDTH / 2, 30);
+      }
+
+      if (gameState === 'CLEAR') {
+        ctx.fillStyle = '#f1c40f';
+        ctx.font = 'bold 40px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('全奇獣 撃破！べらぼうな勝利！', GAME_WIDTH/2, 200);
+      }
+
+      if (gameState === 'GAMEOVER') {
+        ctx.fillStyle = '#e74c3c';
+        ctx.font = 'bold 40px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('爆発失敗... 芸術は爆発だ！', GAME_WIDTH/2, 200);
+      }
+    }
+
+    canvas.addEventListener('click', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const clickX = (e.clientX - rect.left) / scale;
+      const clickY = (e.clientY - rect.top) / scale;
+
+      if (gameState === 'TITLE') {
+        gameState = 'SELECT_DIFF';
+      } else if (gameState === 'SELECT_DIFF') {
+        if (clickX >= 250 && clickX <= 550) {
+          if (clickY >= 150 && clickY <= 200) difficulty = 'EASY';
+          if (clickY >= 220 && clickY <= 270) difficulty = 'NORMAL';
+          if (clickY >= 290 && clickY <= 340) difficulty = 'NANI_KORE';
+          currentStage = 0;
+          initGame();
+          gameState = 'PLAYING';
+        }
+      } else if (gameState === 'GAMEOVER' || gameState === 'CLEAR') {
+        gameState = 'TITLE';
+      }
+    });
+
+    function gameLoop() {
+      update();
+      draw();
+      requestAnimationFrame(gameLoop);
+    }
+    gameLoop();
+  </script>
+</body>
+</html>
